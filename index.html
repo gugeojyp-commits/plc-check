@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>연수 이수자 정보 등록</title>
+  <title>전문적학습공동체 이수 확인 및 등록</title>
   <style>
     body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background-color: #f4f6f9; max-width: 420px; margin: 40px auto; padding: 20px; }
     .box { background: #fff; border: 1px solid #e0e0e0; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
@@ -14,22 +14,22 @@
     button { width: 100%; padding: 12px; margin-top: 18px; font-size: 16px; font-weight: bold; background-color: #4285f4; color: white; border: none; border-radius: 6px; cursor: pointer; }
     button:hover { background-color: #3367d6; }
     #submitSection { display: none; margin-top: 20px; border-top: 1px dashed #ccc; padding-top: 15px; }
-    .badge { background-color: #e6f4ea; color: #137333; padding: 10px; border-radius: 6px; font-size: 14px; font-weight: bold; text-align: center; margin-bottom: 10px; }
-    #message { margin-top: 15px; font-size: 14px; font-weight: bold; text-align: center; line-height: 1.4; }
+    .badge { background-color: #e6f4ea; color: #137333; padding: 12px; border-radius: 6px; font-size: 14px; font-weight: bold; text-align: center; margin-bottom: 10px; line-height: 1.5; }
+    #message { margin-top: 15px; font-size: 14px; font-weight: bold; text-align: center; line-height: 1.5; white-space: pre-line; }
   </style>
 </head>
 <body>
   <div class="box">
-    <h2>연수 이수 확인 및 정보 등록</h2>
+    <h2>전학공 이수 확인 및 정보 등록</h2>
     
-    <!-- 1단계: 성명으로 이수 여부 확인 -->
+    <!-- 1단계: 성명으로 이수 여부 및 시간 확인 -->
     <label for="userName">성명</label>
     <input type="text" id="userName" placeholder="예: 홍길동">
-    <button onclick="checkUser()">이수 여부 확인</button>
+    <button onclick="checkUser()">이수 여부 조회</button>
 
-    <!-- 2단계: 대상자 확인 후 입력 영역 -->
+    <!-- 2단계: 이수자 확인 후 입력 영역 -->
     <div id="submitSection">
-      <div class="badge">✔ 연수 이수 대상자로 확인되었습니다.</div>
+      <div class="badge" id="timeInfo"></div>
       
       <label for="userPosition">직급</label>
       <select id="userPosition">
@@ -51,17 +51,18 @@
   </div>
 
   <script>
-    // Google Apps Script 배포 후 받은 웹 앱 URL을 아래에 붙여넣으세요.
+    // Google Apps Script 새 배포 후 받은 웹 앱 URL을 아래에 붙여넣으세요.
     const GAS_URL = "YOUR_GAS_WEB_APP_URL";
 
     async function checkUser() {
       const name = document.getElementById("userName").value.trim();
       const msg = document.getElementById("message");
       const submitSection = document.getElementById("submitSection");
+      const timeInfo = document.getElementById("timeInfo");
 
       if (!name) { showMsg("성명을 입력해주세요.", "#d93025"); return; }
 
-      showMsg("대상자 명단을 조회 중입니다...", "#555");
+      showMsg("명단 및 이수 시간을 조회 중입니다...", "#555");
       submitSection.style.display = "none";
 
       try {
@@ -71,12 +72,18 @@
         });
         const data = await res.json();
 
+        // 시간/분 텍스트 포맷팅 (예: 15시간 30분, 0분일 경우 15시간)
+        const timeText = data.minutes > 0 ? `${data.hours}시간 ${data.minutes}분` : `${data.hours}시간`;
+
         if (data.status === "found") {
+          timeInfo.innerHTML = `✔ 연수 <b>이수</b> 대상자입니다.<br>(인정 시간: ${timeText})`;
           msg.innerText = data.alreadySubmitted ? "※ 이미 제출된 이력이 있습니다. 수정이 필요하면 다시 제출해주세요." : "";
           msg.style.color = "#e37400";
           submitSection.style.display = "block";
+        } else if (data.status === "not_completed") {
+          showMsg(`❌ 연수 미이수 대상자입니다.\n(현재 누적 참여 시간: ${timeText})`, "#d93025");
         } else {
-          showMsg("이수 대상자 명단에 없습니다.\n성함을 다시 확인해주세요.", "#d93025");
+          showMsg("명단에 없는 성함입니다. 성함을 다시 확인해주세요.", "#d93025");
         }
       } catch (e) {
         showMsg("통신 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", "#d93025");
