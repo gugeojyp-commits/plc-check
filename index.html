@@ -1,63 +1,137 @@
-function doPost(e) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("명단");
-  const data = sheet.getDataRange().getValues();
-  const params = JSON.parse(e.postData.contents);
-  
-  const action = params.action;
-  const name = params.name.trim();
-  
-  // 1. 이수 여부 및 참여 시간(G열)/분(H열) 조회
-  if (action === "check") {
-    for (let i = 1; i < data.length; i++) {
-      const sheetName = String(data[i][0]).trim();
-      
-      if (sheetName === name) {
-        const status = String(data[i][5]).trim(); // F열: 이수여부 ('이수' 또는 '미이수')
-        const hours = data[i][6] !== "" ? data[i][6] : 0; // G열: 시간
-        const minutes = data[i][7] !== "" ? data[i][7] : 0; // H열: 분
-        
-        if (status === "이수") {
-          return createResponse({ 
-            status: "found", 
-            hours: hours,
-            minutes: minutes,
-            alreadySubmitted: data[i][3] !== "" // D열: 나이스번호 기제출 여부
-          });
-        } else {
-          return createResponse({ 
-            status: "not_completed",
-            hours: hours,
-            minutes: minutes
-          });
-        }
-      }
-    }
-    return createResponse({ status: "not_found" });
-  }
-  
-  // 2. 생년월일, 직급, 나이스 개인번호 저장
-  if (action === "submit") {
-    const birth = String(params.birth).trim();
-    const position = params.position.trim();
-    const neisId = params.neisId.trim().toUpperCase();
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>2026 감일고 전학공 이수 확인 및 등록</title>
+  <style>
+    body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background-color: #f4f6f9; max-width: 420px; margin: 40px auto; padding: 20px; }
+    .box { background: #fff; border: 1px solid #e0e0e0; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+    h2 { margin-top: 0; font-size: 20px; color: #222; text-align: center; margin-bottom: 20px; }
+    label { display: block; font-size: 14px; font-weight: bold; color: #444; margin-top: 14px; }
+    input, select { width: 100%; padding: 11px; margin-top: 6px; box-sizing: border-box; font-size: 15px; border: 1px solid #ccc; border-radius: 6px; }
+    input:focus, select:focus { border-color: #4285f4; outline: none; }
+    button { width: 100%; padding: 12px; margin-top: 18px; font-size: 16px; font-weight: bold; background-color: #4285f4; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    button:hover { background-color: #3367d6; }
+    #submitSection { display: none; margin-top: 20px; border-top: 1px dashed #ccc; padding-top: 15px; }
+    .badge { background-color: #e6f4ea; color: #137333; padding: 12px; border-radius: 6px; font-size: 14px; font-weight: bold; text-align: center; margin-bottom: 10px; line-height: 1.5; }
+    #message { margin-top: 15px; font-size: 14px; font-weight: bold; text-align: center; line-height: 1.5; white-space: pre-line; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>2026 감일고 전학공 이수 확인 및 정보 등록</h2>
     
-    for (let i = 1; i < data.length; i++) {
-      const sheetName = String(data[i][0]).trim();
-      const status = String(data[i][5]).trim();
+    <!-- 1단계: 성명으로 이수 여부 및 시간 확인 -->
+    <label for="userName">성명</label>
+    <input type="text" id="userName" placeholder="예: 홍길동" onkeydown="if(event.key === 'Enter') checkUser()">
+    <button onclick="checkUser()">이수 여부 조회</button>
+
+    <!-- 2단계: 이수자 확인 후 입력 영역 -->
+    <div id="submitSection" onkeydown="if(event.key === 'Enter') submitInfo()">
+      <div class="badge" id="timeInfo"></div>
       
-      if (sheetName === name && status === "이수") {
-        sheet.getRange(i + 1, 2).setValue("'" + birth); // B열: 생년월일
-        sheet.getRange(i + 1, 3).setValue(position);    // C열: 직급
-        sheet.getRange(i + 1, 4).setValue(neisId);      // D열: 나이스 개인번호
-        sheet.getRange(i + 1, 5).setValue(new Date());  // E열: 제출일시
-        return createResponse({ status: "success" });
+      <label for="userPosition">직급</label>
+      <select id="userPosition">
+        <option value="">-- 직급을 선택하세요 --</option>
+        <option value="교사">교사</option>
+        <option value="기간제교사">기간제교사</option>
+      </select>
+
+      <label for="userBirth">생년월일 (주민번호 앞 6자리)</label>
+      <input type="text" id="userBirth" maxlength="6" inputmode="numeric" placeholder="예: 801123">
+
+      <label for="neisId">나이스 개인번호 (10자리)</label>
+      <input type="text" id="neisId" maxlength="10" placeholder="예: J100001234" style="text-transform: uppercase;">
+
+      <button onclick="submitInfo()" style="background-color: #0f9d58;">정보 제출하기</button>
+    </div>
+
+    <div id="message"></div>
+  </div>
+
+  <script>
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbx_Qj8BLu_ExswfKDLIPAGQgvA1J4Zw84DOMeexBtNTuhE6h_IJqxzMjK44xNd24gt3/exec";
+
+    async function checkUser() {
+      const name = document.getElementById("userName").value.trim();
+      const msg = document.getElementById("message");
+      const submitSection = document.getElementById("submitSection");
+      const timeInfo = document.getElementById("timeInfo");
+
+      if (!name) { showMsg("성명을 입력해주세요.", "#d93025"); return; }
+
+      showMsg("명단 및 이수 시간을 조회 중입니다...", "#555");
+      submitSection.style.display = "none";
+
+      try {
+        const res = await fetch(GAS_URL, {
+          method: "POST",
+          redirect: "follow",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8",
+          },
+          body: JSON.stringify({ action: "check", name: name })
+        });
+        const data = await res.json();
+
+        if (data.status === "found") {
+          timeInfo.innerHTML = `✔ 전학공 <b>이수</b> 대상자입니다.<br>(인정 시간: ${data.hours}시간)`;
+          msg.innerText = data.alreadySubmitted ? "※ 이미 제출된 이력이 있습니다. 수정이 필요하면 다시 제출해주세요." : "";
+          msg.style.color = "#e37400";
+          submitSection.style.display = "block";
+        } else if (data.status === "not_completed") {
+          showMsg(`❌ 전학공 미이수 대상자입니다.\n(현재 누적 참여 시간: ${data.hours}시간)`, "#d93025");
+        } else {
+          showMsg("명단에 없는 성함입니다. 성함을 다시 확인해주세요.", "#d93025");
+        }
+      } catch (e) {
+        showMsg("통신 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", "#d93025");
       }
     }
-    return createResponse({ status: "error" });
-  }
-}
 
-function createResponse(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+    async function submitInfo() {
+      const name = document.getElementById("userName").value.trim();
+      const position = document.getElementById("userPosition").value;
+      const birth = document.getElementById("userBirth").value.trim();
+      const neisId = document.getElementById("neisId").value.trim().toUpperCase();
+
+      if (!position) { showMsg("직급(교사 / 기간제교사)을 선택해주세요.", "#d93025"); return; }
+      if (!/^\d{6}$/.test(birth)) { showMsg("생년월일은 숫자 6자리로 입력해주세요. (예: 850315)", "#d93025"); return; }
+      if (!/^[A-Z]\d{9}$/.test(neisId)) { 
+        showMsg("나이스 개인번호 형식이 올바르지 않습니다.\n(영문 1자리 + 숫자 9자리, 총 10자리)", "#d93025"); 
+        return; 
+      }
+
+      showMsg("정보를 저장 중입니다...", "#555");
+
+      try {
+        const res = await fetch(GAS_URL, {
+          method: "POST",
+          redirect: "follow",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8",
+          },
+          body: JSON.stringify({ action: "submit", name: name, position: position, birth: birth, neisId: neisId })
+        });
+        const data = await res.json();
+
+        if (data.status === "success") {
+          showMsg("정상적으로 제출되었습니다. 감사합니다!", "#137333");
+          document.getElementById("submitSection").style.display = "none";
+        } else {
+          showMsg("저장 중 오류가 발생했습니다. 다시 시도해주세요.", "#d93025");
+        }
+      } catch (e) {
+        showMsg("저장 중 통신 오류가 발생했습니다.", "#d93025");
+      }
+    }
+
+    function showMsg(text, color) {
+      const msg = document.getElementById("message");
+      msg.style.color = color;
+      msg.innerText = text;
+    }
+  </script>
+</body>
+</html>
